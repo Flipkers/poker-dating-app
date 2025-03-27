@@ -41,6 +41,22 @@ label {
     font-weight: 500;
 }
 
+.form-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #666;
+}
+
+input:invalid, textarea:invalid {
+    border-color: #dc3545;
+}
+
+input:focus:invalid, textarea:focus:invalid {
+    border-color: #dc3545;
+    box-shadow: 0 0 0 2px rgba(220, 53, 69, 0.25);
+}
+
 input, textarea {
     width: 100%;
     padding: 8px;
@@ -205,4 +221,93 @@ textarea {
     background-color: rgba(0, 0, 0, 0.05);
     border-radius: var(--border-radius);
     text-align: left;
+}
+
+/* Waiting Screen Styles */
+.waiting-content {
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid #f3f3f3;
+    border-top: 5px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.waiting-stats {
+    margin: 20px 0;
+    padding: 15px;
+    background-color: var(--card-background);
+    border-radius: var(--border-radius);
+}
+
+.waiting-stats p {
+    margin: 5px 0;
+}
+
+.button.secondary {
+    background-color: #666;
+}
+
+.button.secondary:hover {
+    background-color: #555;
+}
+
+/* Player Info Styles */
+.player-info {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    font-size: 18px;
+}
+
+.vs {
+    color: #666;
+    font-weight: bold;
+}
+
+#current-player, #opponent-player {
+    padding: 5px 15px;
+    background-color: var(--card-background);
+    border-radius: var(--border-radius);
+}
+
+/* Profile Actions Styles */
+#profile-actions {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#profile-actions .button {
+    margin: 5px 0;
+}
+
+#profile-actions .button.secondary {
+    background-color: #666;
+}
+
+#profile-actions .button.secondary:hover {
+    background-color: #555;
+}
+
+#profile-actions .button.delete {
+    background-color: #dc3545;
+}
+
+#profile-actions .button.delete:hover {
+    background-color: #c82333;
 } 
