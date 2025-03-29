@@ -3,7 +3,7 @@ const webapp = window.Telegram.WebApp;
 webapp.expand();
 
 // Initialize Socket.IO
-const socket = io('https://poker-dating-backend.onrender.com');
+const socket = io('http://localhost:3000');
 
 // Generate a unique ID if not in Telegram
 function generateUniqueId() {
@@ -55,7 +55,9 @@ let currentState = {
     isWaiting: false,
     matchFound: false,
     opponent: null,
-    matchId: null
+    sessionId: null,
+    turn: null,
+    history: []
 };
 
 // DOM Elements
@@ -137,8 +139,7 @@ elements.profileForm.addEventListener('submit', (e) => {
         age: parseInt(document.getElementById('age').value),
         location: document.getElementById('location').value.trim(),
         bio: document.getElementById('bio').value.trim(),
-        telegramId: webapp.initDataUnsafe.user?.id,
-        uniqueId: uniqueId // Add unique ID to profile
+        uniqueId: uniqueId
     };
 
     if (!validateProfile(newProfile)) {
@@ -147,9 +148,7 @@ elements.profileForm.addEventListener('submit', (e) => {
     }
 
     currentState.profile = newProfile;
-    // Save profile to localStorage with unique ID
     localStorage.setItem(`pokerDatingProfile_${uniqueId}`, JSON.stringify(currentState.profile));
-    // Show profile actions
     elements.profileForm.classList.add('hidden');
     elements.profileActions.classList.remove('hidden');
 });
@@ -167,7 +166,6 @@ elements.joinGameBtn.addEventListener('click', () => {
 elements.editProfileBtn.addEventListener('click', () => {
     elements.profileForm.classList.remove('hidden');
     elements.profileActions.classList.add('hidden');
-    // Pre-fill the form with current profile data
     document.getElementById('name').value = currentState.profile.name;
     document.getElementById('age').value = currentState.profile.age;
     document.getElementById('location').value = currentState.profile.location;
@@ -183,22 +181,52 @@ elements.deleteProfileBtn.addEventListener('click', () => {
 });
 
 // Socket.IO event handlers
+socket.on('connect', () => {
+    console.log('Connected to server');
+});
+
 socket.on('waitingCount', (count) => {
     elements.onlinePlayers.textContent = count;
 });
 
+socket.on('queueStatus', (status) => {
+    elements.waitTime.textContent = status.message;
+});
+
 socket.on('matchFound', (data) => {
     currentState.matchFound = true;
-    currentState.matchId = data.matchId;
+    currentState.sessionId = data.sessionId;
     currentState.opponent = data.opponent;
+    currentState.turn = data.session.turn;
+    currentState.stage = data.session.stage;
+    currentState.compatibility = data.session.compatibility;
+    currentState.history = data.session.history;
     startGame();
 });
 
-socket.on('matchUpdate', (match) => {
-    // Update game state based on match data
-    currentState.stage = match.currentStage;
-    currentState.compatibility = match.compatibility;
-    updateProgress();
+socket.on('gameUpdate', (data) => {
+    if (data.sessionId === currentState.sessionId) {
+        currentState.turn = data.session.turn;
+        currentState.history = data.session.history;
+        currentState.compatibility = data.session.compatibility;
+        updateGameUI();
+    }
+});
+
+socket.on('stageComplete', (data) => {
+    if (data.sessionId === currentState.sessionId) {
+        currentState.stage = data.stage;
+        currentState.compatibility = 0;
+        webapp.showAlert(`Congratulations! You've progressed to stage ${data.stage}!`);
+        updateGameUI();
+    }
+});
+
+socket.on('playerDisconnected', (data) => {
+    if (data.sessionId === currentState.sessionId) {
+        webapp.showAlert('Other player disconnected');
+        showScreen('profile');
+    }
 });
 
 socket.on('error', (error) => {
@@ -209,12 +237,7 @@ socket.on('error', (error) => {
 function startWaiting() {
     currentState.isWaiting = true;
     showScreen('waiting');
-    updateWaitingStats();
     socket.emit('joinWaiting', currentState.profile);
-}
-
-function updateWaitingStats() {
-    // Stats will be updated via Socket.IO events
 }
 
 elements.cancelWaitingBtn.addEventListener('click', () => {
@@ -227,115 +250,107 @@ elements.cancelWaitingBtn.addEventListener('click', () => {
 function startGame() {
     currentState.isWaiting = false;
     showScreen('game');
-    updateCard();
-    updateProgress();
-    updatePlayerInfo();
+    updateGameUI();
 }
 
-function updatePlayerInfo() {
+function updateGameUI() {
     elements.currentPlayer.textContent = currentState.profile.name;
     elements.opponentPlayer.textContent = currentState.opponent.name;
+    elements.currentStage.textContent = `Stage ${currentState.stage}`;
+    updateCompatibilityProgress();
+    updateCardUI();
 }
 
-function updateCard() {
-    const category = cardCategories[currentState.currentCategory];
-    const question = category[currentState.currentQuestionIndex];
-    elements.cardQuestion.textContent = question;
-    elements.cardAnswer.classList.add('hidden');
-    elements.answerInput.classList.remove('hidden');
-    elements.submitAnswer.classList.remove('hidden');
-    elements.answerInput.value = '';
+function updateCompatibilityProgress() {
+    const progress = (currentState.compatibility / 100) * 100;
+    elements.compatibilityProgress.style.width = `${progress}%`;
+}
+
+function updateCardUI() {
+    const isMyTurn = currentState.turn === socket.id;
+    const lastCard = currentState.history[currentState.history.length - 1];
     
-    // Hide action buttons until answer is submitted
+    // Clear previous state
+    elements.cardQuestion.textContent = '';
+    elements.cardAnswer.textContent = '';
+    elements.cardAnswer.classList.add('hidden');
+    elements.answerInput.value = '';
+    elements.answerInput.classList.add('hidden');
+    elements.submitAnswer.classList.add('hidden');
     elements.likeBtn.classList.add('hidden');
     elements.skipBtn.classList.add('hidden');
     elements.compromiseBtn.classList.add('hidden');
+
+    if (isMyTurn) {
+        if (!lastCard || lastCard.response) {
+            // My turn to ask a question
+            const category = cardCategories[currentState.currentCategory];
+            const question = category[currentState.currentQuestionIndex];
+            elements.cardQuestion.textContent = question;
+            elements.answerInput.classList.remove('hidden');
+            elements.submitAnswer.classList.remove('hidden');
+        } else {
+            // Waiting for opponent's response
+            elements.cardQuestion.textContent = lastCard.card.question;
+            elements.cardAnswer.textContent = lastCard.card.answer;
+            elements.cardAnswer.classList.remove('hidden');
+            elements.waitTime.textContent = "Waiting for opponent's response...";
+        }
+    } else {
+        if (lastCard && !lastCard.response) {
+            // My turn to respond
+            elements.cardQuestion.textContent = lastCard.card.question;
+            elements.cardAnswer.textContent = lastCard.card.answer;
+            elements.cardAnswer.classList.remove('hidden');
+            elements.likeBtn.classList.remove('hidden');
+            elements.skipBtn.classList.remove('hidden');
+            elements.compromiseBtn.classList.remove('hidden');
+        } else {
+            // Waiting for opponent's question
+            elements.waitTime.textContent = "Waiting for opponent's question...";
+        }
+    }
 }
 
-function updateProgress() {
-    const progress = (currentState.compatibility / 100) * 100;
-    elements.compatibilityProgress.style.width = `${progress}%`;
-    elements.currentStage.textContent = currentState.stage;
-}
-
-// Update card actions to emit events
 elements.submitAnswer.addEventListener('click', () => {
     const answer = elements.answerInput.value.trim();
-    if (answer) {
-        elements.cardAnswer.textContent = answer;
-        elements.cardAnswer.classList.remove('hidden');
-        elements.answerInput.classList.add('hidden');
-        elements.submitAnswer.classList.add('hidden');
-        
-        elements.likeBtn.classList.remove('hidden');
-        elements.skipBtn.classList.remove('hidden');
-        elements.compromiseBtn.classList.remove('hidden');
+    if (!answer) {
+        webapp.showAlert('Please write your answer first!');
+        return;
     }
+
+    const category = cardCategories[currentState.currentCategory];
+    const question = category[currentState.currentQuestionIndex];
+    
+    socket.emit('submitCard', {
+        sessionId: currentState.sessionId,
+        card: {
+            question,
+            answer
+        }
+    });
 });
 
 elements.likeBtn.addEventListener('click', () => {
-    if (!elements.cardAnswer.textContent) {
-        webapp.showAlert('Please submit your answer first!');
-        return;
-    }
-    
-    socket.emit('gameAction', {
-        matchId: currentState.matchId,
-        action: 'like',
-        answer: elements.cardAnswer.textContent
+    socket.emit('respondCard', {
+        sessionId: currentState.sessionId,
+        response: 'like'
     });
-    
-    currentState.compatibility += 25;
-    if (currentState.compatibility >= 100) {
-        currentState.stage++;
-        currentState.compatibility = 0;
-    }
-    nextCard();
 });
 
 elements.skipBtn.addEventListener('click', () => {
-    if (!elements.cardAnswer.textContent) {
-        webapp.showAlert('Please submit your answer first!');
-        return;
-    }
-    
-    socket.emit('gameAction', {
-        matchId: currentState.matchId,
-        action: 'skip',
-        answer: elements.cardAnswer.textContent
+    socket.emit('respondCard', {
+        sessionId: currentState.sessionId,
+        response: 'dislike'
     });
-    
-    nextCard();
 });
 
 elements.compromiseBtn.addEventListener('click', () => {
-    if (!elements.cardAnswer.textContent) {
-        webapp.showAlert('Please submit your answer first!');
-        return;
-    }
-    
-    socket.emit('gameAction', {
-        matchId: currentState.matchId,
-        action: 'compromise',
-        answer: elements.cardAnswer.textContent
+    socket.emit('respondCard', {
+        sessionId: currentState.sessionId,
+        response: 'compromise'
     });
-    
-    currentState.compatibility += 10;
-    nextCard();
 });
-
-function nextCard() {
-    currentState.currentQuestionIndex++;
-    if (currentState.currentQuestionIndex >= cardCategories[currentState.currentCategory].length) {
-        currentState.currentQuestionIndex = 0;
-        // Rotate through categories
-        const categories = Object.keys(cardCategories);
-        const currentIndex = categories.indexOf(currentState.currentCategory);
-        currentState.currentCategory = categories[(currentIndex + 1) % categories.length];
-    }
-    updateCard();
-    updateProgress();
-}
 
 // Start the app
 init(); 
